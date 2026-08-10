@@ -1,7 +1,9 @@
 import csv
 import io
+import json
 import sqlite3
 import sys
+import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -13,32 +15,75 @@ from PyQt6.QtWidgets import (
     QDateEdit, QSpinBox, QHeaderView, QAbstractItemView, QGroupBox,
     QGridLayout, QTextEdit, QFileDialog
 )
-from PyQt6.QtCore import Qt, QDate
-from PyQt6.QtGui import QColor, QFont, QPixmap
+from PyQt6.QtCore import Qt, QDate, QSize, QThread, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QPixmap, QIcon
 
-COVER_CACHE = {}
+COVERS_DIR = Path(__file__).resolve().parent / "copertine"
+COVER_URL_CACHE = {}
 
 
-def scarica_copertina(isbn):
-    if not isbn:
-        return None
-    isbn = isbn.strip()
-    if isbn in COVER_CACHE:
-        return COVER_CACHE[isbn]
+def trova_copertina_url(titolo, autore):
+    key = (titolo.lower().strip(), autore.lower().strip())
+    if key in COVER_URL_CACHE:
+        return COVER_URL_CACHE[key]
+    q = urllib.parse.quote(f"{titolo} {autore}")
+    url = (f"https://openlibrary.org/search.json?q={q}"
+           "&limit=3&fields=title,author_name,cover_i")
     try:
-        url = f"https://covers.openlibrary.org/b/isbn/{isbn}-M.jpg"
         req = urllib.request.Request(url, headers={"User-Agent": "RubricaBiblioteca/1.0"})
-        with urllib.request.urlopen(req, timeout=6) as resp:
-            if resp.status != 200:
-                return None
-            data = resp.read()
-            pix = QPixmap()
-            if pix.loadFromData(data):
-                COVER_CACHE[isbn] = pix
-                return pix
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.load(resp)
+        for d in data.get("docs", []):
+            ci = d.get("cover_i")
+            if ci:
+                COVER_URL_CACHE[key] = f"https://covers.openlibrary.org/b/id/{ci}-L.jpg"
+                return COVER_URL_CACHE[key]
     except Exception:
         pass
-    COVER_CACHE[isbn] = None
+    COVER_URL_CACHE[key] = None
+    return None
+
+
+def file_copertina(libro_id):
+    return COVERS_DIR / f"{libro_id}.jpg"
+
+
+class CopertinaWorker(QThread):
+    fatta = pyqtSignal(int)
+
+    def __init__(self, libro_id, url, percorso):
+        super().__init__()
+        self.libro_id = libro_id
+        self.url = url
+        self.percorso = percorso
+
+    def run(self):
+        try:
+            req = urllib.request.Request(
+                self.url, headers={"User-Agent": "RubricaBiblioteca/1.0"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = resp.read()
+            if len(data) > 1500:
+                self.percorso.parent.mkdir(parents=True, exist_ok=True)
+                self.percorso.write_bytes(data)
+                self.fatta.emit(self.libro_id)
+        except Exception:
+            pass
+
+
+def scarica_copertina(titolo, autore):
+    url = trova_copertina_url(titolo, autore)
+    if not url:
+        return None
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "RubricaBiblioteca/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = resp.read()
+        pix = QPixmap()
+        if pix.loadFromData(data):
+            return pix
+    except Exception:
+        pass
     return None
 
 DB_PATH = Path(__file__).resolve().parent / "biblioteca.db"
@@ -219,13 +264,12 @@ class DettagliLibroDialog(QDialog):
         info.addWidget(chiudi, alignment=Qt.AlignmentFlag.AlignRight)
         lay.addLayout(info)
 
-        if libro["isbn"]:
-            pix = scarica_copertina(libro["isbn"])
-            if pix and not pix.isNull():
-                self.cover_label.setPixmap(pix.scaled(
-                    150, 220, Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation))
-                self.cover_label.setStyleSheet("border: none;")
+        pix = scarica_copertina(libro["titolo"], libro["autore"])
+        if pix and not pix.isNull():
+            self.cover_label.setPixmap(pix.scaled(
+                150, 220, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation))
+            self.cover_label.setStyleSheet("border: none;")
 
 
 def status_of(libro_id, prestiti_map):
@@ -310,12 +354,15 @@ class MainWindow(QMainWindow):
         year_row.addStretch()
         lay.addLayout(year_row)
 
-        self.table_libri = QTableWidget(0, 6)
-        self.table_libri.setHorizontalHeaderLabels(["Titolo", "Autore", "Anno", "Genere", "Stato", "Prestito a"])
+        self.table_libri = QTableWidget(0, 7)
+        self.table_libri.setHorizontalHeaderLabels(["Copertina", "Titolo", "Autore", "Anno", "Genere", "Stato", "Prestito a"])
         self.table_libri.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table_libri.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table_libri.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table_libri.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table_libri.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table_libri.verticalHeader().setDefaultSectionSize(60)
+        self.table_libri.setIconSize(QSize(40, 55))
         self.table_libri.doubleClicked.connect(lambda: self.show_details())
         lay.addWidget(self.table_libri)
 
@@ -376,20 +423,52 @@ class MainWindow(QMainWindow):
         self._libri.sort(key=lambda l: (l[order_key] is None, l[order_key] or ""))
 
         self.table_libri.setRowCount(len(self._libri))
+        self._cover_workers = getattr(self, "_cover_workers", [])
         for r, libro in enumerate(self._libri):
             st = status_of(libro["id"], p_map)
             persona = ""
             if libro["id"] in p_map and p_map[libro["id"]]["data_restituzione"] is None:
                 persona = p_map[libro["id"]]["persona"]
-            self.table_libri.setItem(r, 0, QTableWidgetItem(libro["titolo"]))
-            self.table_libri.setItem(r, 1, QTableWidgetItem(libro["autore"]))
-            self.table_libri.setItem(r, 2, QTableWidgetItem(str(libro["anno"]) if libro["anno"] else "—"))
-            self.table_libri.setItem(r, 3, QTableWidgetItem(libro["genere"] or "—"))
+
+            item_cover = QTableWidgetItem()
+            f = file_copertina(libro["id"])
+            if f.exists():
+                pix = QPixmap(str(f))
+                if not pix.isNull():
+                    item_cover.setIcon(QIcon(pix.scaled(
+                        40, 55, Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation)))
+            self.table_libri.setItem(r, 0, item_cover)
+
+            self.table_libri.setItem(r, 1, QTableWidgetItem(libro["titolo"]))
+            self.table_libri.setItem(r, 2, QTableWidgetItem(libro["autore"]))
+            self.table_libri.setItem(r, 3, QTableWidgetItem(str(libro["anno"]) if libro["anno"] else "—"))
+            self.table_libri.setItem(r, 4, QTableWidgetItem(libro["genere"] or "—"))
             item_st = QTableWidgetItem(st)
             item_st.setForeground(STATUS_COLORS[st])
-            self.table_libri.setItem(r, 4, item_st)
-            self.table_libri.setItem(r, 5, QTableWidgetItem(persona))
+            self.table_libri.setItem(r, 5, item_st)
+            self.table_libri.setItem(r, 6, QTableWidgetItem(persona))
+            self._cover_workers = [w for w in self._cover_workers if w.isRunning()]
+
+            if not f.exists():
+                url = trova_copertina_url(libro["titolo"], libro["autore"])
+                if url:
+                    w = CopertinaWorker(libro["id"], url, f)
+                    w.fatta.connect(self.on_copertina_pronta)
+                    self._cover_workers.append(w)
+                    w.start()
         conn.close()
+
+    def on_copertina_pronta(self, libro_id):
+        for r in range(self.table_libri.rowCount()):
+            if self._libri and r < len(self._libri) and self._libri[r]["id"] == libro_id:
+                f = file_copertina(libro_id)
+                pix = QPixmap(str(f))
+                if not pix.isNull():
+                    self.table_libri.item(r, 0).setIcon(QIcon(pix.scaled(
+                        40, 55, Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation)))
+                break
 
     def aggiorna_generi(self):
         conn = get_conn()

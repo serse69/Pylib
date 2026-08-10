@@ -116,6 +116,9 @@
 *.sqlite
 *.sqlite3
 
+# Downloaded book covers
+copertine/
+
 # Temporary files
 *.tmp
 *.temp
