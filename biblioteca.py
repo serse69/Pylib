@@ -1,5 +1,8 @@
-import sys
+import csv
+import io
 import sqlite3
+import sys
+import urllib.request
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -8,10 +11,35 @@ from PyQt6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QTabWidget, QMessageBox, QDialog, QFormLayout, QComboBox,
     QDateEdit, QSpinBox, QHeaderView, QAbstractItemView, QGroupBox,
-    QGridLayout, QTextEdit
+    QGridLayout, QTextEdit, QFileDialog
 )
 from PyQt6.QtCore import Qt, QDate
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QColor, QFont, QPixmap
+
+COVER_CACHE = {}
+
+
+def scarica_copertina(isbn):
+    if not isbn:
+        return None
+    isbn = isbn.strip()
+    if isbn in COVER_CACHE:
+        return COVER_CACHE[isbn]
+    try:
+        url = f"https://covers.openlibrary.org/b/isbn/{isbn}-M.jpg"
+        req = urllib.request.Request(url, headers={"User-Agent": "RubricaBiblioteca/1.0"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            if resp.status != 200:
+                return None
+            data = resp.read()
+            pix = QPixmap()
+            if pix.loadFromData(data):
+                COVER_CACHE[isbn] = pix
+                return pix
+    except Exception:
+        pass
+    COVER_CACHE[isbn] = None
+    return None
 
 DB_PATH = Path(__file__).resolve().parent / "biblioteca.db"
 
@@ -140,6 +168,66 @@ class PrestitoDialog(QDialog):
         form.addRow(btns)
 
 
+class DettagliLibroDialog(QDialog):
+    def __init__(self, parent=None, libro=None, stato=""):
+        super().__init__(parent)
+        self.setWindowTitle("Dettagli libro")
+        self.setMinimumSize(480, 320)
+
+        lay = QHBoxLayout(self)
+        self.cover_label = QLabel("Nessuna copertina\n(senza ISBN)")
+        self.cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cover_label.setFixedSize(150, 220)
+        self.cover_label.setStyleSheet(
+            "border: 1px dashed #888; border-radius: 6px; color: #777;")
+        lay.addWidget(self.cover_label)
+
+        info = QVBoxLayout()
+        titolo = QLabel(libro["titolo"])
+        titolo.setFont(QFont("", 16, QFont.Weight.Bold))
+        titolo.setWordWrap(True)
+        info.addWidget(titolo)
+        autore = QLabel(libro["autore"])
+        autore.setFont(QFont("", 12))
+        info.addWidget(autore)
+
+        det = [
+            ("Anno", str(libro["anno"]) if libro["anno"] else "—"),
+            ("Genere", libro["genere"] or "—"),
+            ("ISBN", libro["isbn"] or "—"),
+            ("Stato", stato),
+        ]
+        for k, v in det:
+            row = QHBoxLayout()
+            kk = QLabel(f"<b>{k}:</b>")
+            vv = QLabel(v)
+            row.addWidget(kk)
+            row.addWidget(vv)
+            row.addStretch()
+            info.addLayout(row)
+
+        if libro["note"]:
+            info.addWidget(QLabel("<b>Note:</b>"))
+            note = QLabel(libro["note"])
+            note.setWordWrap(True)
+            note.setStyleSheet("color: #666;")
+            info.addWidget(note)
+
+        info.addStretch()
+        chiudi = QPushButton("Chiudi")
+        chiudi.clicked.connect(self.accept)
+        info.addWidget(chiudi, alignment=Qt.AlignmentFlag.AlignRight)
+        lay.addLayout(info)
+
+        if libro["isbn"]:
+            pix = scarica_copertina(libro["isbn"])
+            if pix and not pix.isNull():
+                self.cover_label.setPixmap(pix.scaled(
+                    150, 220, Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation))
+                self.cover_label.setStyleSheet("border: none;")
+
+
 def status_of(libro_id, prestiti_map):
     if libro_id in prestiti_map:
         p = prestiti_map[libro_id]
@@ -187,15 +275,40 @@ class MainWindow(QMainWindow):
         self.search.setPlaceholderText("Titolo, autore, genere o ISBN...")
         self.search.textChanged.connect(self.load_libri)
         search_row.addWidget(self.search)
-        status_row = QHBoxLayout()
-        status_row.addWidget(QLabel("Filtro stato:"))
+
+        search_row.addWidget(QLabel("Genere:"))
+        self.filter_genre = QComboBox()
+        self.filter_genre.addItem("Tutti")
+        self.filter_genre.currentTextChanged.connect(self.load_libri)
+        search_row.addWidget(self.filter_genre)
+
+        search_row.addWidget(QLabel("Stato:"))
         self.filter_status = QComboBox()
         self.filter_status.addItems(["Tutti", "Disponibile", "In prestito", "In ritardo"])
         self.filter_status.currentTextChanged.connect(self.load_libri)
-        status_row.addWidget(self.filter_status)
-        status_row.addStretch()
+        search_row.addWidget(self.filter_status)
         lay.addLayout(search_row)
-        lay.addLayout(status_row)
+
+        year_row = QHBoxLayout()
+        year_row.addWidget(QLabel("Anno dal:"))
+        self.year_from = QSpinBox()
+        self.year_from.setRange(0, 2100)
+        self.year_from.setSpecialValueText("Tutti")
+        self.year_from.valueChanged.connect(self.load_libri)
+        year_row.addWidget(self.year_from)
+        year_row.addWidget(QLabel("al:"))
+        self.year_to = QSpinBox()
+        self.year_to.setRange(0, 2100)
+        self.year_to.setValue(2100)
+        self.year_to.valueChanged.connect(self.load_libri)
+        year_row.addWidget(self.year_to)
+        year_row.addWidget(QLabel("Ordinamento:"))
+        self.sort_by = QComboBox()
+        self.sort_by.addItems(["Titolo", "Autore", "Anno", "Genere"])
+        self.sort_by.currentTextChanged.connect(self.load_libri)
+        year_row.addWidget(self.sort_by)
+        year_row.addStretch()
+        lay.addLayout(year_row)
 
         self.table_libri = QTableWidget(0, 6)
         self.table_libri.setHorizontalHeaderLabels(["Titolo", "Autore", "Anno", "Genere", "Stato", "Prestito a"])
@@ -203,21 +316,25 @@ class MainWindow(QMainWindow):
         self.table_libri.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table_libri.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table_libri.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table_libri.doubleClicked.connect(lambda: self.edit_libro())
+        self.table_libri.doubleClicked.connect(lambda: self.show_details())
         lay.addWidget(self.table_libri)
 
         btns = QHBoxLayout()
         b_add = QPushButton("Aggiungi libro")
         b_edit = QPushButton("Modifica")
         b_del = QPushButton("Elimina")
+        b_dett = QPushButton("Dettagli")
         b_prestito = QPushButton("Registra prestito")
         b_rest = QPushButton("Restituisci")
+        b_csv = QPushButton("Esporta CSV")
         b_add.clicked.connect(lambda: self.add_libro())
         b_edit.clicked.connect(lambda: self.edit_libro())
         b_del.clicked.connect(lambda: self.delete_libro())
+        b_dett.clicked.connect(lambda: self.show_details())
         b_prestito.clicked.connect(lambda: self.new_prestito())
         b_rest.clicked.connect(lambda: self.return_libro())
-        for b in (b_add, b_edit, b_del, b_prestito, b_rest):
+        b_csv.clicked.connect(lambda: self.export_csv())
+        for b in (b_add, b_edit, b_dett, b_del, b_prestito, b_rest, b_csv):
             btns.addWidget(b)
         btns.addStretch()
         lay.addLayout(btns)
@@ -232,24 +349,38 @@ class MainWindow(QMainWindow):
     def load_libri(self):
         q = self.search.text().strip()
         filtro = self.filter_status.currentText()
+        genere = self.filter_genre.currentText()
+        y_from = self.year_from.value() if self.year_from.value() else -10000
+        y_to = self.year_to.value() if self.year_to.value() else 2100
+        ordine = self.sort_by.currentText()
         conn = get_conn()
         p_map = prestiti_per_libro(conn)
-        rows = conn.execute("SELECT * FROM libri ORDER BY titolo COLLATE NOCASE").fetchall()
+        rows = conn.execute("SELECT * FROM libri").fetchall()
         self._libri = []
-        self.table_libri.setRowCount(0)
         for libro in rows:
             st = status_of(libro["id"], p_map)
             if filtro != "Tutti" and st != filtro:
+                continue
+            if genere != "Tutti" and (libro["genere"] or "") != genere:
+                continue
+            anno = libro["anno"] or 0
+            if anno and not (y_from <= anno <= y_to):
                 continue
             if q and q.lower() not in " ".join(filter(None, [
                     libro["titolo"], libro["autore"], libro["genere"], libro["isbn"]
             ])).lower():
                 continue
+            self._libri.append(libro)
+
+        order_key = {"Titolo": "titolo", "Autore": "autore", "Anno": "anno", "Genere": "genere"}[ordine]
+        self._libri.sort(key=lambda l: (l[order_key] is None, l[order_key] or ""))
+
+        self.table_libri.setRowCount(len(self._libri))
+        for r, libro in enumerate(self._libri):
+            st = status_of(libro["id"], p_map)
             persona = ""
             if libro["id"] in p_map and p_map[libro["id"]]["data_restituzione"] is None:
                 persona = p_map[libro["id"]]["persona"]
-            r = self.table_libri.rowCount()
-            self.table_libri.insertRow(r)
             self.table_libri.setItem(r, 0, QTableWidgetItem(libro["titolo"]))
             self.table_libri.setItem(r, 1, QTableWidgetItem(libro["autore"]))
             self.table_libri.setItem(r, 2, QTableWidgetItem(str(libro["anno"]) if libro["anno"] else "—"))
@@ -258,8 +389,63 @@ class MainWindow(QMainWindow):
             item_st.setForeground(STATUS_COLORS[st])
             self.table_libri.setItem(r, 4, item_st)
             self.table_libri.setItem(r, 5, QTableWidgetItem(persona))
-            self._libri.append(libro)
         conn.close()
+
+    def aggiorna_generi(self):
+        conn = get_conn()
+        rows = conn.execute(
+            "SELECT DISTINCT genere FROM libri WHERE genere IS NOT NULL AND genere != '' "
+            "ORDER BY genere COLLATE NOCASE").fetchall()
+        conn.close()
+        current = self.filter_genre.currentText()
+        self.filter_genre.blockSignals(True)
+        self.filter_genre.clear()
+        self.filter_genre.addItem("Tutti")
+        for r in rows:
+            self.filter_genre.addItem(r["genere"])
+        if current in [self.filter_genre.itemText(i) for i in range(self.filter_genre.count())]:
+            self.filter_genre.setCurrentText(current)
+        self.filter_genre.blockSignals(False)
+
+    def show_details(self):
+        libro = self.current_libro()
+        if not libro:
+            QMessageBox.information(self, "Nessuna selezione", "Seleziona un libro dalla lista.")
+            return
+        conn = get_conn()
+        p_map = prestiti_per_libro(conn)
+        conn.close()
+        st = status_of(libro["id"], p_map)
+        dlg = DettagliLibroDialog(self, libro, st)
+        dlg.exec()
+
+    def export_csv(self):
+        if not self._libri:
+            QMessageBox.information(self, "Nessun libro", "Non c'è nulla da esportare.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Salva esportazione", "biblioteca.csv", "File CSV (*.csv)")
+        if not path:
+            return
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f, delimiter=";")
+                w.writerow(["Titolo", "Autore", "Anno", "Genere", "ISBN", "Stato", "Prestito a"])
+                for libro in self._libri:
+                    conn = get_conn()
+                    p_map = prestiti_per_libro(conn)
+                    conn.close()
+                    st = status_of(libro["id"], p_map)
+                    persona = ""
+                    if libro["id"] in p_map and p_map[libro["id"]]["data_restituzione"] is None:
+                        persona = p_map[libro["id"]]["persona"]
+                    w.writerow([
+                        libro["titolo"], libro["autore"], libro["anno"] or "",
+                        libro["genere"] or "", libro["isbn"] or "", st, persona
+                    ])
+            self.statusBar().showMessage(f"Esportati {len(self._libri)} libri in {path}", 6000)
+        except OSError as e:
+            QMessageBox.critical(self, "Errore", f"Impossibile salvare il file:\n{e}")
 
     def add_libro(self):
         dlg = LibroDialog(self)
@@ -277,6 +463,7 @@ class MainWindow(QMainWindow):
             conn.commit()
             conn.close()
             self.load_libri()
+            self.aggiorna_generi()
             self.load_statistiche()
 
     def edit_libro(self):
@@ -298,6 +485,7 @@ class MainWindow(QMainWindow):
             conn.commit()
             conn.close()
             self.load_libri()
+            self.aggiorna_generi()
             self.load_statistiche()
 
     def delete_libro(self):
@@ -315,6 +503,7 @@ class MainWindow(QMainWindow):
             conn.close()
             self.load_libri()
             self.load_prestiti()
+            self.aggiorna_generi()
             self.load_statistiche()
 
     # ------------------------------------------------------- PRESTITI
@@ -523,6 +712,7 @@ def main():
     init_db()
     app = QApplication(sys.argv)
     win = MainWindow()
+    win.aggiorna_generi()
     win.load_libri()
     win.load_prestiti()
     win.load_statistiche()
