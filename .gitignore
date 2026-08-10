@@ -111,6 +111,11 @@
 *.pem
 *.key
 
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
 # Temporary files
 *.tmp
 *.temp
