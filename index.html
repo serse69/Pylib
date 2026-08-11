@@ -1,580 +1,749 @@
 <!DOCTYPE html>
+<!-- ============================================================================
+     TETRIS - un classico gioco di blocchi da giocare nel browser
+     ----------------------------------------------------------------------------
+     Questo file è un'unica pagina web completa: contiene in un solo documento
+     il HTML (struttura), il CSS (aspetto) e il JavaScript (logica del gioco).
+
+     COME FUNZIONA IN BREVE
+     ----------------------
+     - Il campo di gioco è un canvas (tela) di 300x600 pixel, diviso in una
+       griglia invisibile di 10 colonne e 20 righe.
+     - I pezzi (tetramini) cadono dall'alto; il giocatore li muove con le frecce.
+     - Quando una riga si riempie completamente, viene eliminata e si guadagnano
+       punti. Il gioco accelera a ogni livello.
+     ============================================================================ -->
 <html lang="it">
 <head>
+<!-- La sezione <head> contiene le informazioni "di testa" della pagina: sono
+     dichiarazioni che il browser legge ma non mostra a schermo. -->
 <meta charset="UTF-8">
+<!-- charset: dice al browser che il file usa i caratteri Unicode, così le
+     lettere accentate italiane (è, à, ò...) vengono mostrate correttamente. -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- viewport: su cellulari, adatta la pagina alla larghezza del dispositivo
+     invece di fare uno zoom strano. Fondamentale per i controlli touch. -->
 <title>Tetris</title>
+<!-- title: il testo che appare nella scheda del browser. -->
+
 <style>
+  /* ==========================================================================
+     SEZIONE CSS - definisce l'aspetto visivo della pagina
+     ========================================================================== */
+
+  /* Selettore universale "*": applica a TUTTI gli elementi della pagina
+     queste regole. margin:0 e padding:0 azzerano gli spazi predefiniti del
+     browser; box-sizing:border-box fa sì che larghezza/altezza dichiarate
+     includano anche bordo e padding (più prevedibile nei calcoli). */
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
+  /* Stile del <body> (il corpo della pagina): sfondo con gradiente, layout. */
   body {
-    font-family: 'Segoe UI', Roboto, system-ui, sans-serif;
-    background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
+    font-family: 'Segoe UI', Roboto, system-ui, sans-serif;  /* Font di sistema moderni. */
+    background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);  /* Sfondo sfumato viola. */
+    min-height: 100vh;    /* Altezza minima = altezza dello schermo (vh = viewport height). */
+    display: flex;        /* Rende il body un contenitore flessibile. */
+    align-items: center;  /* Centra i figli verticalmente. */
+    justify-content: center;  /* Centra i figli orizzontalmente. */
+    color: #fff;          /* Testo bianco. */
   }
 
+  /* Il contenitore principale che tiene insieme tabella, pannelli laterali. */
   .wrapper {
-    display: flex;
-    gap: 20px;
-    align-items: flex-start;
-    padding: 20px;
+    display: flex;        /* Disposizione flessibile. */
+    gap: 20px;            /* Spazio di 20px tra gli elementi figli. */
+    align-items: flex-start;  /* Allinea i figli in alto (non al centro). */
+    padding: 20px;        /* Spazio interno di 20px. */
   }
 
+  /* Pannelli laterali (punteggio, prossimo pezzo, riserva...). */
   .side-panel {
-    width: 160px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+    width: 160px;         /* Larghezza fissa. */
+    display: flex;        /* Disposizione flessibile. */
+    flex-direction: column;  /* Gli elementi si impilano in colonna. */
+    gap: 16px;            /* Spazio tra un pannello e l'altro. */
   }
 
+  /* Ogni singola scatola/pannello (riquadro semi-trasparente). */
   .panel {
-    background: rgba(255, 255, 255, 0.07);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 12px;
-    padding: 14px;
-    backdrop-filter: blur(6px);
+    background: rgba(255, 255, 255, 0.07);  /* Bianco quasi invisibile (trasparenza). */
+    border: 1px solid rgba(255, 255, 255, 0.12);  /* Bordo sottile quasi invisibile. */
+    border-radius: 12px;  /* Angoli arrotondati. */
+    padding: 14px;        /* Spazio interno. */
+    backdrop-filter: blur(6px);  /* Effetto vetro smerigliato sullo sfondo. */
   }
 
+  /* I titolini dei pannelli (es. "PUNTEGGIO"). */
   .panel h3 {
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    color: #9aa0c8;
-    margin-bottom: 8px;
+    font-size: 12px;            /* Testo piccolo. */
+    text-transform: uppercase;  /* Tutto maiuscolo. */
+    letter-spacing: 2px;        /* Spaziatura tra le lettere (elegante). */
+    color: #9aa0c8;             /* Viola chiaro. */
+    margin-bottom: 8px;         /* Spazio sotto il titolo. */
   }
 
+  /* Il valore grande dentro il pannello (es. il punteggio). */
   .panel .value {
-    font-size: 26px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
+    font-size: 26px;            /* Font grande. */
+    font-weight: 700;           /* Molto grassetto. */
+    font-variant-numeric: tabular-nums;  /* Cifre di larghezza uguale (non "saltano"). */
   }
 
+  /* I canvas piccoli dentro i pannelli (anteprima prossimo pezzo e riserva). */
   .panel canvas {
-    display: block;
-    margin: 0 auto;
-    background: #0b0a1e;
-    border-radius: 8px;
+    display: block;       /* Comportamento da blocco (evita riga di testo attorno). */
+    margin: 0 auto;       /* Centrato orizzontalmente. */
+    background: #0b0a1e;  /* Sfondo scuro. */
+    border-radius: 8px;   /* Angoli arrotondati. */
   }
 
+  /* Contenitore che avvolge il campo di gioco (per posizionare le overlay). */
   .board-wrap {
-    position: relative;
+    position: relative;   /* Riferimento per posizionare in assoluto le overlay. */
   }
 
+  /* Il canvas principale del campo di gioco. */
   #board {
-    background: #0b0a1e;
-    border: 2px solid rgba(255, 255, 255, 0.15);
-    border-radius: 12px;
-    box-shadow: 0 0 60px rgba(90, 60, 200, 0.35);
-    display: block;
+    background: #0b0a1e;  /* Sfondo scuro del campo. */
+    border: 2px solid rgba(255, 255, 255, 0.15);  /* Bordo sottile. */
+    border-radius: 12px;  /* Angoli arrotondati. */
+    box-shadow: 0 0 60px rgba(90, 60, 200, 0.35);  /* Bagliore viola attorno. */
+    display: block;       /* Comportamento da blocco. */
   }
 
+  /* Le "overlay": strati trasparenti sopra il campo (start, pausa, game over).
+     Sono posizionate sopra il canvas coprendolo completamente. */
   .overlay {
-    position: absolute;
-    inset: 0;
-    background: rgba(11, 10, 30, 0.85);
-    border-radius: 12px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 18px;
-    text-align: center;
+    position: absolute;      /* Posizione assoluta dentro .board-wrap. */
+    inset: 0;                /* Copre tutto: top/right/bottom/left = 0. */
+    background: rgba(11, 10, 30, 0.85);  /* Sfondo scuro quasi opaco. */
+    border-radius: 12px;     /* Angoli arrotondati (coerenti col canvas). */
+    display: flex;           /* Disposizione flessibile. */
+    flex-direction: column;  /* Contenuti impilati in colonna. */
+    align-items: center;     /* Centrati orizzontalmente. */
+    justify-content: center; /* Centrati verticalmente. */
+    gap: 18px;               /* Spazio tra i contenuti. */
+    text-align: center;      /* Testo centrato. */
   }
 
+  /* La classe "hidden" NASCONDE l'overlay (display:none = non visibile).
+     Quando rimuoviamo questa classe, l'overlay riappare. */
   .overlay.hidden { display: none; }
 
+  /* Il grande titolo "TETRIS" con effetto gradiente colorato sul testo. */
   .overlay h1 {
-    font-size: 42px;
-    letter-spacing: 4px;
-    background: linear-gradient(90deg, #ff512f, #dd2476, #ff512f);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    font-size: 42px;           /* Font grande. */
+    letter-spacing: 4px;       /* Spaziatura tra lettere. */
+    background: linear-gradient(90deg, #ff512f, #dd2476, #ff512f);  /* Sfondo gradiente. */
+    -webkit-background-clip: text;  /* Ritaglia lo sfondo sulla forma delle lettere. */
+    -webkit-text-fill-color: transparent;  /* Rende il testo trasparente (si vede il gradiente). */
   }
 
+  /* Testo descrittivo dentro le overlay. */
   .overlay p { color: #c9cdf5; max-width: 240px; line-height: 1.5; }
 
+  /* Stile base dei pulsanti (Gioca, Riprendi, Rigioca). */
   .btn {
-    background: linear-gradient(90deg, #ff512f, #dd2476);
-    border: none;
-    color: #fff;
-    font-size: 16px;
-    font-weight: 700;
-    padding: 12px 30px;
-    border-radius: 30px;
-    cursor: pointer;
-    transition: transform 0.15s, filter 0.15s;
-    letter-spacing: 1px;
+    background: linear-gradient(90deg, #ff512f, #dd2476);  /* Sfondo arancione-rosa. */
+    border: none;             /* Nessun bordo. */
+    color: #fff;              /* Testo bianco. */
+    font-size: 16px;          /* Font medio. */
+    font-weight: 700;         /* Grassetto. */
+    padding: 12px 30px;       /* Spazio interno (sopra/sotto, sinistra/destra). */
+    border-radius: 30px;      /* Pulsante molto arrotondato (a pillola). */
+    cursor: pointer;          /* Cursore a mano quando ci passi sopra. */
+    transition: transform 0.15s, filter 0.15s;  /* Animazione morbida al hover. */
+    letter-spacing: 1px;      /* Leggera spaziatura. */
   }
 
+  /* Al passaggio del mouse: il pulsante cresce leggermente e si illumina. */
   .btn:hover { transform: scale(1.06); filter: brightness(1.1); }
+
+  /* Quando si preme il pulsante: si comprime leggermente (effetto clic). */
   .btn:active { transform: scale(0.96); }
 
+  /* Blocco dei comandi tastiera nel pannello laterale destro. */
   .controls {
-    font-size: 13px;
-    color: #c9cdf5;
-    line-height: 1.8;
+    font-size: 13px;      /* Testo piccolo. */
+    color: #c9cdf5;       /* Viola chiaro. */
+    line-height: 1.8;     /* Interlinea comoda. */
   }
 
+  /* Le parole in grassetto (i tasti) dentro i comandi. */
   .controls b { color: #fff; }
 
+  /* Le piccole "pillole" che raffigurano i tasti (es. Spazio). */
   .keys { display: inline-block; background: rgba(255,255,255,0.12); padding: 1px 7px; border-radius: 5px; font-size: 12px; }
 
+  /* Titolo della schermata di game over, in rosso. */
   .gameover-title { font-size: 32px; color: #ff5f7a; letter-spacing: 2px; }
 
+  /* Contenitore dei pulsanti touch (per giocare col dito sul cellulare). */
   .touch-controls {
-    display: none;
-    margin-top: 20px;
-    justify-content: center;
-    gap: 10px;
+    display: none;        /* Nascosti di default (il PC usa la tastiera). */
+    margin-top: 20px;     /* Spazio sopra. */
+    justify-content: center;  /* Centrati. */
+    gap: 10px;            /* Spazio tra i pulsanti. */
   }
 
+  /* Ogni pulsante touch (frecce grandi). */
   .touch-controls button {
-    width: 64px;
-    height: 64px;
-    border-radius: 14px;
-    border: none;
-    background: rgba(255, 255, 255, 0.12);
-    color: #fff;
-    font-size: 24px;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    user-select: none;
+    width: 64px;          /* Larghezza. */
+    height: 64px;         /* Altezza (pulsante quadrato). */
+    border-radius: 14px;  /* Angoli arrotondati. */
+    border: none;         /* Nessun bordo. */
+    background: rgba(255, 255, 255, 0.12);  /* Sfondo trasparente. */
+    color: #fff;          /* Testo bianco. */
+    font-size: 24px;      /* Frecce grandi. */
+    cursor: pointer;      /* Cursore a mano. */
+    -webkit-tap-highlight-color: transparent;  /* Toglie lo sfondo blu al tocco su Android. */
+    user-select: none;    /* Non selezionabile con il dito (niente testo evidenziato). */
   }
 
+  /* Regole "responsive": quando lo schermo è stretto (max-width 700px,
+     tipicamente un telefono) la disposizione cambia per adattarsi. */
   @media (max-width: 700px) {
-    .wrapper { flex-direction: column-reverse; align-items: center; }
-    .side-panel { flex-direction: row; width: auto; }
-    .touch-controls { display: flex; flex-wrap: wrap; }
+    .wrapper { flex-direction: column-reverse; align-items: center; }  /* Colonne impilate, ordine invertito. */
+    .side-panel { flex-direction: row; width: auto; }  /* Pannelli affiancati. */
+    .touch-controls { display: flex; flex-wrap: wrap; }  /* Mostra i pulsanti touch. */
   }
 </style>
 </head>
 <body>
+<!-- Il <body> contiene gli elementi visibili della pagina. -->
+
+  <!-- Contenitore principale: due pannelli laterali + campo di gioco. -->
   <div class="wrapper">
+
+    <!-- PANNELO SINISTRO: punteggio, record, livello, linee, prossimo, riserva. -->
     <div class="side-panel">
       <div class="panel">
-        <h3>Punteggio</h3>
-        <div class="value" id="score">0</div>
+        <h3>Punteggio</h3>                        <!-- Titolo del pannello. -->
+        <div class="value" id="score">0</div>     <!-- Valore, aggiornato da JavaScript (id=score). -->
       </div>
       <div class="panel">
-        <h3>Record</h3>
-        <div class="value" id="best">0</div>
+        <h3>Record</h3>                           <!-- Il punteggio migliore salvato. -->
+        <div class="value" id="best">0</div>      <!-- id=best, letto dal localStorage. -->
       </div>
       <div class="panel">
-        <h3>Livello</h3>
-        <div class="value" id="level">1</div>
+        <h3>Livello</h3>                          <!-- Livello di velocità. -->
+        <div class="value" id="level">1</div>     <!-- id=level, parte da 1. -->
       </div>
       <div class="panel">
-        <h3>Linee</h3>
-        <div class="value" id="lines">0</div>
+        <h3>Linee</h3>                            <!-- Righe completate. -->
+        <div class="value" id="lines">0</div>     <!-- id=lines. -->
       </div>
       <div class="panel">
-        <h3>Prossimo</h3>
-        <canvas id="next" width="80" height="80"></canvas>
+        <h3>Prossimo</h3>                         <!-- Anteprima del prossimo pezzo. -->
+        <canvas id="next" width="80" height="80"></canvas>  <!-- Canvas 80x80. -->
       </div>
       <div class="panel">
-        <h3>Riserva</h3>
-        <canvas id="hold" width="80" height="80"></canvas>
+        <h3>Riserva</h3>                          <!-- Pezzo tenuto in riserva (tasto H). -->
+        <canvas id="hold" width="80" height="80"></canvas>  <!-- Canvas 80x80. -->
       </div>
     </div>
 
+    <!-- CONTENITORE DEL CAMPO DI GIOCO. -->
     <div class="board-wrap">
+      <!-- Canvas principale: 300x600 pixel = 10 colonne x 30px, 20 righe x 30px. -->
       <canvas id="board" width="300" height="600"></canvas>
 
+      <!-- OVERLAY DI INIZIO: mostrata all'avvio, chiede di premere Gioca. -->
       <div class="overlay" id="startOverlay">
-        <h1>TETRIS</h1>
-        <p>Schiaccia il tasto per iniziare a giocare</p>
-        <button class="btn" id="startBtn">Gioca</button>
+        <h1>TETRIS</h1>                                  <!-- Titolo. -->
+        <p>Schiaccia il tasto per iniziare a giocare</p> <!-- Istruzione. -->
+        <button class="btn" id="startBtn">Gioca</button> <!-- Pulsante Gioca. -->
       </div>
 
+      <!-- OVERLAY DI PAUSA: appare quando si preme P. -->
       <div class="overlay hidden" id="pauseOverlay">
-        <h1 style="font-size:32px">PAUSA</h1>
-        <p>Premi <span class="keys">P</span> o il pulsante per riprendere</p>
-        <button class="btn" id="resumeBtn">Riprendi</button>
+        <h1 style="font-size:32px">PAUSA</h1>           <!-- Titolo PAUSA (grande). -->
+        <p>Premi <span class="keys">P</span> o il pulsante per riprendere</p>  <!-- Istruzione. -->
+        <button class="btn" id="resumeBtn">Riprendi</button>  <!-- Pulsante Riprendi. -->
       </div>
 
+      <!-- OVERLAY DI GAME OVER: appare quando il gioco finisce. -->
       <div class="overlay hidden" id="gameOverOverlay">
-        <div class="gameover-title">GAME OVER</div>
-        <p id="finalScore"></p>
-        <button class="btn" id="restartBtn">Rigioca</button>
+        <div class="gameover-title">GAME OVER</div>     <!-- Titolo rosso. -->
+        <p id="finalScore"></p>                          <!-- Punteggio finale (compilato da JS). -->
+        <button class="btn" id="restartBtn">Rigioca</button>  <!-- Pulsante Rigioca. -->
       </div>
     </div>
 
+    <!-- PANNELO DESTRO: l'elenco dei comandi tastiera. -->
     <div class="side-panel">
       <div class="panel controls">
-        <h3>Comandi</h3>
-        <b>&larr; &rarr;</b> Muovi<br>
-        <b>&uarr;</b> Ruota<br>
-        <b>&darr;</b> Scendi<br>
-        <b>Spazio</b> Drop<br>
-        <b>C</b> Scendi<br>
-        <b>H</b> Riserva<br>
-        <b>P</b> Pausa
+        <h3>Comandi</h3>                     <!-- Titolo. -->
+        <b>&larr; &rarr;</b> Muovi<br>       <!-- Frecce: muovi il pezzo. -->
+        <b>&uarr;</b> Ruota<br>              <!-- Freccia su: ruota. -->
+        <b>&darr;</b> Scendi<br>             <!-- Freccia giù: scendi di una riga. -->
+        <b>Spazio</b> Drop<br>               <!-- Spazio: caduta immediata. -->
+        <b>C</b> Scendi<br>                  <!-- C: scendi di una riga (alternativa). -->
+        <b>H</b> Riserva<br>                 <!-- H: metti in riserva. -->
+        <b>P</b> Pausa                       <!-- P: metti in pausa. -->
       </div>
     </div>
   </div>
 
+  <!-- CONTROLLI TOUCH: visibili solo su schermi piccoli (cellulare).
+       Ogni pulsante ha data-action = il nome dell'azione da eseguire. -->
   <div class="touch-controls">
-    <button data-action="left">&#8592;</button>
-    <button data-action="rotate">&#8635;</button>
-    <button data-action="right">&#8594;</button>
-    <button data-action="down">&#8595;</button>
-    <button data-action="drop">&#9195;</button>
-    <button data-action="hold">R</button>
+    <button data-action="left">&#8592;</button>    <!-- Freccia sinistra. -->
+    <button data-action="rotate">&#8635;</button>  <!-- Simbolo di rotazione. -->
+    <button data-action="right">&#8594;</button>   <!-- Freccia destra. -->
+    <button data-action="down">&#8595;</button>    <!-- Freccia giù. -->
+    <button data-action="drop">&#9195;</button>    <!-- Simbolo di caduta. -->
+    <button data-action="hold">R</button>          <!-- Riserva. -->
   </div>
 
 <script>
+// ============================================================================
+// SEZIONE JAVASCRIPT - tutta la logica del gioco
+// ============================================================================
+
+// Uso una funzione anonima auto-eseguente: "(function(){ ... })()". Serve a
+// incapsulare tutto il codice: le variabili interne non "inquinano" la pagina
+// e nessuna altra parte del browser può interferire con il gioco.
 (() => {
-  const COLS = 10, ROWS = 20;
-  const CELL = 30;
+  // COSTANTI DEL GIOCO
+  const COLS = 10;   // Numero di colonne della griglia.
+  const ROWS = 20;   // Numero di righe della griglia.
+  const CELL = 30;   // Larghezza di una cella in pixel (30px, vedi canvas 300x600).
 
-  const boardCanvas = document.getElementById('board');
-  const ctx = boardCanvas.getContext('2d');
-  const nextCanvas = document.getElementById('next');
-  const nextCtx = nextCanvas.getContext('2d');
-  const holdCanvas = document.getElementById('hold');
-  const holdCtx = holdCanvas.getContext('2d');
+  // RIFERIMENTI AGLI ELEMENTI DELLA PAGINA
+  // Ottengo dall'HTML i canvas e i loro contesti di disegno 2D. Un canvas si
+  // disegna attraverso il suo "context": è l'oggetto con i metodi per disegnare
+  // (fillRect, strokeRect...).
+  const boardCanvas = document.getElementById('board');   // Canvas del campo.
+  const ctx = boardCanvas.getContext('2d');               // Contesto 2D del campo.
+  const nextCanvas = document.getElementById('next');     // Canvas prossimo pezzo.
+  const nextCtx = nextCanvas.getContext('2d');            // Contesto 2D prossimo.
+  const holdCanvas = document.getElementById('hold');     // Canvas riserva.
+  const holdCtx = holdCanvas.getContext('2d');            // Contesto 2D riserva.
 
-  const scoreEl = document.getElementById('score');
-  const bestEl = document.getElementById('best');
-  const levelEl = document.getElementById('level');
-  const linesEl = document.getElementById('lines');
+  // Riferimenti agli elementi di testo (per aggiornare i valori a schermo).
+  const scoreEl = document.getElementById('score');    // Punteggio.
+  const bestEl = document.getElementById('best');      // Record.
+  const levelEl = document.getElementById('level');    // Livello.
+  const linesEl = document.getElementById('lines');    // Linee completate.
 
+  // Riferimenti alle overlay (schermate di start, pausa, game over).
   const startOverlay = document.getElementById('startOverlay');
   const pauseOverlay = document.getElementById('pauseOverlay');
   const gameOverOverlay = document.getElementById('gameOverOverlay');
-  const finalScoreEl = document.getElementById('finalScore');
+  const finalScoreEl = document.getElementById('finalScore');   // Punteggio finale.
 
+  // SHAPES: le forme dei 7 tetramini (i pezzi classici del Tetris).
+  // Ogni forma è una matrice (griglia) di 1 (cella piena) e 0 (cella vuota).
+  // Le lettere sono i nomi convenzionali: I, O, T, S, Z, J, L.
   const SHAPES = {
-    I: [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
-    O: [[1,1],[1,1]],
-    T: [[0,1,0],[1,1,1],[0,0,0]],
-    S: [[0,1,1],[1,1,0],[0,0,0]],
-    Z: [[1,1,0],[0,1,1],[0,0,0]],
-    J: [[1,0,0],[1,1,1],[0,0,0]],
-    L: [[0,0,1],[1,1,1],[0,0,0]]
+    I: [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],  // Pezzo I: una linea orizzontale.
+    O: [[1,1],[1,1]],                              // Pezzo O: un quadrato 2x2.
+    T: [[0,1,0],[1,1,1],[0,0,0]],                  // Pezzo T: a forma di T.
+    S: [[0,1,1],[1,1,0],[0,0,0]],                  // Pezzo S: inclinato a destra.
+    Z: [[1,1,0],[0,1,1],[0,0,0]],                  // Pezzo Z: inclinato a sinistra.
+    J: [[1,0,0],[1,1,1],[0,0,0]],                  // Pezzo J: come una L rivoltata.
+    L: [[0,0,1],[1,1,1],[0,0,0]]                   // Pezzo L: a forma di L.
   };
 
+  // COLORS: il colore di ogni tetramino (stessi nomi delle forme).
   const COLORS = {
-    I: '#00f0f0',
-    O: '#f0f000',
-    T: '#a000f0',
-    S: '#00f000',
-    Z: '#f00000',
-    J: '#0000f0',
-    L: '#f0a000'
+    I: '#00f0f0',  // Ciano.
+    O: '#f0f000',  // Giallo.
+    T: '#a000f0',  // Viola.
+    S: '#00f000',  // Verde.
+    Z: '#f00000',  // Rosso.
+    J: '#0000f0',  // Blu.
+    L: '#f0a000'   // Arancione.
   };
 
-  let board, piece, nextPiece, holdPiece, canHold;
-  let score, best, level, lines, dropInterval, paused, gameOver;
+  // VARIABILI DI STATO DEL GIOCO (mutano durante la partita).
+  let board;        // La griglia fissa: array 20x10 di celle (null = vuota, 'I'/'O'... = pieno).
+  let piece;        // Il pezzo attualmente in caduta {type, shape, x, y}.
+  let nextPiece;    // Il prossimo pezzo che cadrà (per l'anteprima).
+  let holdPiece;    // Il pezzo tenuto in riserva (o null se nessuno).
+  let canHold;      // Booleano: posso ancora usare la riserva? (una volta a pezzo).
+  let score;        // Punteggio corrente.
+  let best;         // Record salvato (dal localStorage del browser).
+  let level;        // Livello corrente (velocità).
+  let lines;        // Righe totali completate.
+  let dropInterval; // Intervallo di caduta in millisecondi (più basso = più veloce).
+  let paused;       // Booleano: il gioco è in pausa?
+  let gameOver;     // Booleano: il gioco è finito?
 
+  // init(): prepara una partita nuova, azzerando tutte le variabili.
   function init() {
     board = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
-    score = 0; lines = 0; level = 1;
-    dropInterval = 1000; paused = false; gameOver = false;
-    canHold = true; holdPiece = null;
-    nextPiece = randomPiece();
-    spawnPiece();
-    updateHUD();
-    drawAll();
+    // Crea una griglia di ROWS righe; ogni riga è un array di COLS celle null.
+    // Array.from({length:N}, fn) genera un array di N elementi creati da fn.
+    score = 0;        // Punteggio a zero.
+    lines = 0;        // Linee a zero.
+    level = 1;        // Livello 1.
+    dropInterval = 1000;  // Caduta iniziale: un pezzo ogni secondo (1000 ms).
+    paused = false;   // Non in pausa.
+    gameOver = false; // Non finito.
+    canHold = true;   // Riserva disponibile.
+    holdPiece = null; // Nessun pezzo in riserva.
+    nextPiece = randomPiece();  // Genero il primo prossimo pezzo.
+    spawnPiece();     // Faccio apparire il pezzo corrente.
+    updateHUD();      // Aggiorno i valori a schermo.
+    drawAll();        // Ridisegno tutto.
   }
 
+  // randomPiece(): genera un pezzo casuale tra i 7 tetramini.
   function randomPiece() {
-    const keys = Object.keys(SHAPES);
+    const keys = Object.keys(SHAPES);   // ['I','O','T','S','Z','J','L'].
     const k = keys[Math.floor(Math.random() * keys.length)];
+    // Math.random() dà un numero tra 0 e 1; moltiplicato per la lunghezza e
+    // troncato con Math.floor sceglie un indice casuale della lista.
     return { type: k, shape: SHAPES[k].map(r => r.slice()), x: 3, y: 0 };
+    // Oggetto pezzo: type = lettera, shape = copia della matrice (.slice()
+    // copia le righe per non modificare l'originale), x = colonna iniziale 3,
+    // y = riga iniziale 0 (in alto).
   }
 
+  // spawnPiece(): mette il prossimo pezzo come pezzo corrente e ne genera uno nuovo.
   function spawnPiece() {
-    piece = nextPiece;
-    piece.x = 3; piece.y = 0;
-    nextPiece = randomPiece();
+    piece = nextPiece;       // Il prossimo diventa il pezzo attivo.
+    piece.x = 3;             // Centrato approssimativamente.
+    piece.y = 0;             // In cima alla griglia.
+    nextPiece = randomPiece();  // Genero il nuovo prossimo pezzo.
+
+    // Se il pezzo appena nato collide subito, significa che la colonna è piena
+    // fino in cima: la partita è finita.
     if (collides(piece, 0, 0)) {
-      gameOver = true;
-      if (score > best) { best = score; localStorage.setItem('tetris-best', best); }
-      showGameOver();
+      gameOver = true;                            // Imposto game over.
+      if (score > best) {                         // Se ho battuto il record...
+        best = score;                             // ...lo aggiorno.
+        localStorage.setItem('tetris-best', best);  // Lo salvo nel browser.
+      }
+      showGameOver();   // Mostro la schermata di fine partita.
     }
   }
 
+  // collides(p, dx, dy, shape): controlla se il pezzo, spostato di dx/dy,
+  // tocca un muro o un blocco fisso. Restituisce true (collisione) o false.
   function collides(p, dx, dy, shape = p.shape) {
-    for (let r = 0; r < shape.length; r++) {
-      for (let c = 0; c < shape[r].length; c++) {
-        if (!shape[r][c]) continue;
-        const nx = p.x + c + dx;
-        const ny = p.y + r + dy;
-        if (nx < 0 || nx >= COLS || ny >= ROWS) return true;
-        if (ny >= 0 && board[ny][nx]) return true;
+    for (let r = 0; r < shape.length; r++) {          // Per ogni riga della forma.
+      for (let c = 0; c < shape[r].length; c++) {     // Per ogni colonna della riga.
+        if (!shape[r][c]) continue;                   // Cella vuota: ignoro.
+        const nx = p.x + c + dx;                      // Colonna finale della cella.
+        const ny = p.y + r + dy;                      // Riga finale della cella.
+        if (nx < 0 || nx >= COLS || ny >= ROWS) return true;  // Fuori dai bordi = collisione.
+        if (ny >= 0 && board[ny][nx]) return true;    // C'è un blocco fisso lì = collisione.
       }
     }
-    return false;
+    return false;   // Nessuna collisione.
   }
 
+  // rotate(): ruota il pezzo di 90 gradi, provando dei piccoli spostamenti
+  // (wall kick) se la rotazione normale non ci sta.
   function rotate() {
-    const shape = piece.shape;
-    const n = shape.length;
+    const shape = piece.shape;         // Matrice attuale.
+    const n = shape.length;            // Lato della matrice (3 o 4).
+    // Rotazione matematica: la nuova riga r, colonna c prende il valore della
+    // vecchia cella (n-1-c, r). È la formula standard della rotazione di 90°.
     const rotated = Array.from({ length: n }, (_, r) =>
       Array.from({ length: n }, (_, c) => shape[n - 1 - c][r])
     );
+    // Wall kick: per il pezzo O (quadrato) la rotazione non serve; per gli altri
+    // provo 6 posizioni: originale, -1, +1, su, -2, +2 lungo l'asse X.
     const kicks = piece.type === 'O' ? [[0,0]] : [[0,0],[-1,0],[1,0],[0,-1],[-2,0],[2,0]];
-    for (const [dx, dy] of kicks) {
+    for (const [dx, dy] of kicks) {   // Provo ogni scostamento...
       if (!collides({ ...piece, shape: rotated }, dx, dy, rotated)) {
-        piece.shape = rotated;
-        piece.x += dx;
+        piece.shape = rotated;   // Se non collide, applico la rotazione.
+        piece.x += dx;           // Sposto il pezzo dello scostamento.
         piece.y += dy;
-        return;
+        return;                  // Rotazione riuscita, esco.
       }
     }
   }
 
+  // movePiece(dx, dy): tenta di spostare il pezzo; restituisce true se è andato
+  // a buon fine, false se il pezzo non può muoversi (collisione).
   function movePiece(dx, dy) {
-    if (!collides(piece, dx, dy)) {
-      piece.x += dx;
-      piece.y += dy;
+    if (!collides(piece, dx, dy)) {   // Se posso muovermi senza collisioni...
+      piece.x += dx;                  // ...applico lo spostamento X.
+      piece.y += dy;                  // ...applico lo spostamento Y.
       return true;
     }
-    return false;
+    return false;   // Non posso muovermi.
   }
 
+  // hardDrop(): fa cadere il pezzo immediatamente fino in fondo e lo blocca.
   function hardDrop() {
-    while (movePiece(0, 1)) {}
-    lockPiece();
+    while (movePiece(0, 1)) {}   // Scendo di una riga finché posso.
+    lockPiece();                 // Blocco il pezzo sulla griglia.
   }
 
+  // softDrop(): scende di una riga (tasto giù / C). Dà 1 punto per riga.
   function softDrop() {
-    if (movePiece(0, 1)) {
-      score += 1;
-      updateHUD();
+    if (movePiece(0, 1)) {       // Se scendo di una riga...
+      score += 1;                // ...guadagno 1 punto.
+      updateHUD();               // Aggiorno il punteggio a schermo.
     }
   }
 
+  // lockPiece(): fissa il pezzo nella griglia (le sue celle diventano permanenti).
   function lockPiece() {
-    for (let r = 0; r < piece.shape.length; r++) {
-      for (let c = 0; c < piece.shape[r].length; c++) {
-        if (piece.shape[r][c]) {
-          const y = piece.y + r;
-          const x = piece.x + c;
-          if (y < 0) { gameOver = true; showGameOver(); return; }
-          board[y][x] = piece.type;
+    for (let r = 0; r < piece.shape.length; r++) {     // Per ogni riga...
+      for (let c = 0; c < piece.shape[r].length; c++) {  // Per ogni colonna...
+        if (piece.shape[r][c]) {                       // Se la cella è piena...
+          const y = piece.y + r;                       // Riga finale sulla griglia.
+          const x = piece.x + c;                       // Colonna finale.
+          if (y < 0) { gameOver = true; showGameOver(); return; }  // Sopra il bordo = perso.
+          board[y][x] = piece.type;   // Scrivo il tipo del pezzo nella griglia.
         }
       }
     }
-    clearLines();
-    canHold = true;
-    spawnPiece();
+    clearLines();      // Controllo se ci sono righe complete da eliminare.
+    canHold = true;    // Riconsegno la riserva (un uso per ogni pezzo).
+    spawnPiece();      // Faccio comparire il pezzo successivo.
   }
 
+  // clearLines(): trova le righe complete, le elimina e aggiorna punteggio.
   function clearLines() {
-    let cleared = 0;
-    for (let r = ROWS - 1; r >= 0; r--) {
-      if (board[r].every(cell => cell !== null)) {
-        board.splice(r, 1);
-        board.unshift(Array(COLS).fill(null));
-        r++;
-        cleared++;
+    let cleared = 0;   // Quante righe eliminate in questo colpo.
+    for (let r = ROWS - 1; r >= 0; r--) {   // Parto dal basso verso l'alto.
+      if (board[r].every(cell => cell !== null)) {   // Se ogni cella è piena...
+        board.splice(r, 1);       // Rimuovo la riga dall'array.
+        board.unshift(Array(COLS).fill(null));  // Aggiungo una riga vuota in cima.
+        r++;                      // Ricontrollo la stessa posizione (la griglia è scivolata).
+        cleared++;                // Incremento il contatore.
       }
     }
-    if (cleared > 0) {
+    if (cleared > 0) {   // Se ho eliminato almeno una riga...
+      // Punteggi classici del Tetris: 1=100, 2=300, 3=500, 4=800 punti, per livello.
       const pts = [0, 100, 300, 500, 800][cleared];
-      score += pts * level;
-      lines += cleared;
-      level = Math.floor(lines / 10) + 1;
-      dropInterval = Math.max(80, 1000 - (level - 1) * 80);
-      updateHUD();
+      score += pts * level;        // Punti = tabella * livello corrente.
+      lines += cleared;            // Aggiorno il totale delle linee.
+      level = Math.floor(lines / 10) + 1;  // Ogni 10 linee salgo di livello.
+      dropInterval = Math.max(80, 1000 - (level - 1) * 80);  // Più veloce, minimo 80ms.
+      updateHUD();                 // Aggiorno i valori a schermo.
     }
   }
 
+  // hold(): mette il pezzo corrente in riserva (e viceversa).
   function hold() {
-    if (!canHold) return;
-    canHold = false;
-    if (holdPiece) {
-      const t = holdPiece;
+    if (!canHold) return;   // Posso usarla una volta per pezzo.
+    canHold = false;        // Segno che l'ho usata.
+    if (holdPiece) {        // Se c'è già un pezzo in riserva...
+      const t = holdPiece;  // ...prendo quello in riserva.
       holdPiece = { type: piece.type, shape: SHAPES[piece.type].map(r => r.slice()) };
-      piece = t;
-      piece.x = 3; piece.y = 0;
-    } else {
+      // Metto il pezzo attuale in riserva (con una copia della sua forma).
+      piece = t;            // Il pezzo in riserva diventa quello attivo.
+      piece.x = 3; piece.y = 0;   // Lo rimetto in cima al centro.
+    } else {                // Se la riserva era vuota...
       holdPiece = { type: piece.type, shape: SHAPES[piece.type].map(r => r.slice()) };
-      spawnPiece();
+      spawnPiece();         // ...faccio comparire il prossimo pezzo.
     }
   }
 
+  // getGhost(): calcola dove finirebbe il pezzo se cadesse (il "fantasma").
   function getGhost() {
-    const g = { ...piece, shape: piece.shape.map(r => r.slice()) };
-    while (!collides(g, 0, 1)) g.y++;
-    return g;
+    const g = { ...piece, shape: piece.shape.map(r => r.slice()) };  // Copia del pezzo.
+    while (!collides(g, 0, 1)) g.y++;   // Scendo finché non collide.
+    return g;   // Restituisco la posizione finale.
   }
 
+  // updateHUD(): aggiorna i valori numerici mostrati a schermo.
   function updateHUD() {
-    scoreEl.textContent = score;
-    levelEl.textContent = level;
-    linesEl.textContent = lines;
-    bestEl.textContent = best;
+    scoreEl.textContent = score;   // Punteggio.
+    levelEl.textContent = level;   // Livello.
+    linesEl.textContent = lines;   // Linee.
+    bestEl.textContent = best;     // Record.
   }
 
+  // drawBlock(context, x, y, type, cellSize): disegna un singolo blocco con un
+  // effetto 3D (bordi chiari sopra, ombra sotto) per un aspetto gradevole.
   function drawBlock(context, x, y, type, cellSize) {
-    const color = COLORS[type];
-    const pad = 1;
-    context.fillStyle = color;
+    const color = COLORS[type];        // Colore del pezzo.
+    const pad = 1;                     // Spaziatura di 1px tra i blocchi.
+    context.fillStyle = color;         // Imposto il colore.
+    // Corpo del blocco: un rettangolo pieno (con 1px di spazio attorno).
     context.fillRect(x * cellSize + pad, y * cellSize + pad, cellSize - pad * 2, cellSize - pad * 2);
-    context.fillStyle = 'rgba(255,255,255,0.35)';
+    context.fillStyle = 'rgba(255,255,255,0.35)';  // Bianco semi-trasparente.
+    // Riflesso alto: una striscia chiara orizzontale in cima al blocco.
     context.fillRect(x * cellSize + pad, y * cellSize + pad, cellSize - pad * 2, 4);
+    // Riflesso sinistro: una striscia chiara verticale a sinistra.
     context.fillRect(x * cellSize + pad, y * cellSize + pad, 4, cellSize - pad * 2);
-    context.fillStyle = 'rgba(0,0,0,0.3)';
+    context.fillStyle = 'rgba(0,0,0,0.3)';  // Nero semi-trasparente.
+    // Ombra: un quadratino scuro in basso a destra (effetto profondità).
     context.fillRect(x * cellSize + cellSize - 5, y * cellSize + cellSize - 5, 4, 4);
   }
 
+  // drawBoard(): disegna l'intero campo di gioco (griglia, blocchi, fantasma, pezzo).
   function drawBoard() {
-    ctx.clearRect(0, 0, boardCanvas.width, boardCanvas.height);
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-    for (let r = 0; r < ROWS; r++) {
-      for (let c = 0; c < COLS; c++) {
-        ctx.strokeRect(c * CELL, r * CELL, CELL, CELL);
-        if (board[r][c]) drawBlock(ctx, c, r, board[r][c], CELL);
+    ctx.clearRect(0, 0, boardCanvas.width, boardCanvas.height);   // Svuoto il canvas.
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';   // Colore quasi invisibile.
+    for (let r = 0; r < ROWS; r++) {              // Per ogni riga...
+      for (let c = 0; c < COLS; c++) {            // Per ogni colonna...
+        ctx.strokeRect(c * CELL, r * CELL, CELL, CELL);  // Disegno il bordo della cella.
+        if (board[r][c]) drawBlock(ctx, c, r, board[r][c], CELL);  // Se piena, disegno il blocco.
       }
     }
-    if (piece && !gameOver) {
-      const ghost = getGhost();
-      for (let r = 0; r < ghost.shape.length; r++) {
+    if (piece && !gameOver) {   // Se c'è un pezzo attivo e non è game over...
+      const ghost = getGhost();   // Calcolo la posizione del fantasma.
+      for (let r = 0; r < ghost.shape.length; r++) {      // Per le celle del fantasma...
         for (let c = 0; c < ghost.shape[r].length; c++) {
-          if (ghost.shape[r][c]) {
-            ctx.strokeStyle = COLORS[piece.type];
-            ctx.globalAlpha = 0.35;
+          if (ghost.shape[r][c]) {                        // Cella piena...
+            ctx.strokeStyle = COLORS[piece.type];         // Colore del pezzo.
+            ctx.globalAlpha = 0.35;                       // Trasparenza (35%).
             ctx.strokeRect((ghost.x + c) * CELL + 2, (ghost.y + r) * CELL + 2, CELL - 4, CELL - 4);
-            ctx.globalAlpha = 1;
+            // Disegno solo il contorno del fantasma.
+            ctx.globalAlpha = 1;                          // Ripristino l'opacità.
           }
         }
       }
-      for (let r = 0; r < piece.shape.length; r++) {
+      for (let r = 0; r < piece.shape.length; r++) {      // Per le celle del pezzo attivo...
         for (let c = 0; c < piece.shape[r].length; c++) {
           if (piece.shape[r][c]) {
-            const y = piece.y + r;
-            if (y >= 0) drawBlock(ctx, piece.x + c, y, piece.type, CELL);
+            const y = piece.y + r;                        // Riga sulla griglia.
+            if (y >= 0) drawBlock(ctx, piece.x + c, y, piece.type, CELL);  // Disegno il blocco.
           }
         }
       }
     }
   }
 
+  // drawPreview(context, pieceObj, canvas): disegna il pezzo piccolo nei canvas
+  // "prossimo" e "riserva", centrato e adattato alle dimensioni.
   function drawPreview(context, pieceObj, canvas) {
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    if (!pieceObj) return;
-    const shape = pieceObj.shape;
-    const n = shape.length;
-    const cell = Math.min(canvas.width / 4, canvas.height / 4);
+    context.clearRect(0, 0, canvas.width, canvas.height);   // Svuoto il canvas.
+    if (!pieceObj) return;   // Nessun pezzo da mostrare.
+    const shape = pieceObj.shape;   // Matrice del pezzo.
+    const n = shape.length;         // Lato della matrice.
+    const cell = Math.min(canvas.width / 4, canvas.height / 4);  // Cella piccola.
+    // Trovo i bordi della forma (min/max di righe e colonne piene) per centrarla.
     let minX = 4, maxX = 0, minY = 4, maxY = 0;
     shape.forEach((row, r) => row.forEach((v, c) => {
       if (v) { minX = Math.min(minX, c); maxX = Math.max(maxX, c); minY = Math.min(minY, r); maxY = Math.max(maxY, r); }
     }));
-    const w = (maxX - minX + 1) * cell;
-    const h = (maxY - minY + 1) * cell;
-    const offX = (canvas.width - w) / 2;
-    const offY = (canvas.height - h) / 2;
+    const w = (maxX - minX + 1) * cell;    // Larghezza della forma in pixel.
+    const h = (maxY - minY + 1) * cell;    // Altezza della forma in pixel.
+    const offX = (canvas.width - w) / 2;   // Spostamento orizzontale per centrare.
+    const offY = (canvas.height - h) / 2;  // Spostamento verticale per centrare.
     shape.forEach((row, r) => row.forEach((v, c) => {
       if (v) drawBlock(context, (offX + (c - minX) * cell) / cell, (offY + (r - minY) * cell) / cell, pieceObj.type, cell);
+      // Disegno ogni blocco spostato dell'offset di centratura.
     }));
   }
 
+  // drawAll(): ridisegna campo e anteprime.
   function drawAll() {
-    drawBoard();
-    drawPreview(nextCtx, nextPiece, nextCanvas);
-    drawPreview(holdCtx, holdPiece, holdCanvas);
+    drawBoard();                                  // Campo di gioco.
+    drawPreview(nextCtx, nextPiece, nextCanvas);  // Anteprima prossimo pezzo.
+    drawPreview(holdCtx, holdPiece, holdCanvas);  // Anteprima riserva.
   }
 
+  // tick(): un "passo" di gioco: il pezzo scende; se non può, viene bloccato.
   function tick() {
-    if (!paused && !gameOver) {
-      if (!movePiece(0, 1)) lockPiece();
-      drawAll();
+    if (!paused && !gameOver) {   // Solo se non sono in pausa o finito...
+      if (!movePiece(0, 1)) lockPiece();   // Scendo; se non posso, blocco il pezzo.
+      drawAll();                           // Ridisegno.
     }
   }
 
+  // showGameOver(): mostra la schermata di fine partita con il punteggio.
   function showGameOver() {
-    finalScoreEl.textContent = 'Punteggio finale: ' + score;
-    gameOverOverlay.classList.remove('hidden');
+    finalScoreEl.textContent = 'Punteggio finale: ' + score;  // Scrivo il punteggio.
+    gameOverOverlay.classList.remove('hidden');   // Tolgo la classe che nasconde l'overlay.
   }
 
+  // reset(): azzera la partita (nasconde le overlay e riparte da zero).
   function reset() {
-    gameOverOverlay.classList.add('hidden');
-    pauseOverlay.classList.add('hidden');
-    init();
-    drawAll();
+    gameOverOverlay.classList.add('hidden');   // Nascondo il game over.
+    pauseOverlay.classList.add('hidden');      // Nascondo la pausa.
+    init();                                    // Inizializzo una nuova partita.
+    drawAll();                                 // Ridisegno.
   }
 
+  // togglePause(): mette in pausa o riprende il gioco.
   function togglePause() {
-    if (gameOver) return;
-    paused = !paused;
-    pauseOverlay.classList.toggle('hidden', !paused);
-    drawAll();
+    if (gameOver) return;   // Se è game over non posso mettere in pausa.
+    paused = !paused;       // Inverto lo stato di pausa.
+    pauseOverlay.classList.toggle('hidden', !paused);  // Mostro/nascondo l'overlay.
+    drawAll();              // Ridisegno.
   }
 
+  // startGame(): avvia la partita dalla schermata iniziale.
   function startGame() {
-    startOverlay.classList.add('hidden');
+    startOverlay.classList.add('hidden');   // Nascondo la schermata iniziale.
+    // Leggo il record salvato nel localStorage (o 0 se non esiste).
     best = parseInt(localStorage.getItem('tetris-best') || '0', 10);
-    reset();
+    reset();                // Azzero e inizio.
   }
 
-  // Keyboard
+  // KEYHANDLERS: la mappa che associa ogni tasto premuto all'azione da eseguire.
+  // e.code è il codice fisico del tasto (funziona anche con tastiere diverse).
   const keyHandlers = {
-    ArrowLeft: () => movePiece(-1, 0),
-    ArrowRight: () => movePiece(1, 0),
-    ArrowDown: () => softDrop(),
-    ArrowUp: () => rotate(),
-    Space: () => hardDrop(),
-    KeyC: () => softDrop(),
-    KeyH: () => hold(),
-    KeyP: () => togglePause()
+    ArrowLeft: () => movePiece(-1, 0),   // Freccia sinistra: muovi a sinistra.
+    ArrowRight: () => movePiece(1, 0),   // Freccia destra: muovi a destra.
+    ArrowDown: () => softDrop(),         // Freccia giù: scendi di una riga.
+    ArrowUp: () => rotate(),             // Freccia su: ruota.
+    Space: () => hardDrop(),             // Spazio: caduta immediata.
+    KeyC: () => softDrop(),              // C: scendi di una riga.
+    KeyH: () => hold(),                  // H: riserva.
+    KeyP: () => togglePause()            // P: pausa.
   };
 
+  // Listener: intercetto la pressione dei tasti su tutta la pagina.
   document.addEventListener('keydown', (e) => {
+    // Se l'overlay di game over o di start è visibile, ignoro i tasti di gioco.
     if (gameOverOverlay.classList.contains('hidden') === false) return;
     if (startOverlay.classList.contains('hidden') === false) return;
-    const fn = keyHandlers[e.code];
-    if (fn) {
-      e.preventDefault();
-      if (!paused) fn();
-      drawAll();
+    const fn = keyHandlers[e.code];   // Cerco l'azione per il tasto premuto.
+    if (fn) {                         // Se il tasto è gestito...
+      e.preventDefault();             // ...blocco il comportamento predefinito (es. scroll con Spazio).
+      if (!paused) fn();              // ...eseguo l'azione (se non in pausa).
+      drawAll();                      // Ridisegno.
     }
   });
 
-  // Touch controls
+  // TOUCH CONTROLS: collego i pulsanti touch (per cellulare).
+  // QuerySelectorAll trova tutti i pulsanti con classe .touch-controls.
   document.querySelectorAll('.touch-controls button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (startOverlay.classList.contains('hidden') === false) return;
-      if (gameOver) return;
-      const action = btn.dataset.action;
+    btn.addEventListener('click', () => {   // Al tocco su un pulsante...
+      if (startOverlay.classList.contains('hidden') === false) return;  // Ignoro se non si gioca.
+      if (gameOver) return;                 // Ignoro se è game over.
+      const action = btn.dataset.action;    // Leggo l'azione dal data-action.
+      // Mappa: nome azione -> funzione da eseguire.
       const map = {
-        left: () => movePiece(-1, 0),
-        right: () => movePiece(1, 0),
-        rotate: () => rotate(),
-        down: () => softDrop(),
-        drop: () => hardDrop(),
-        hold: () => hold()
+        left: () => movePiece(-1, 0),   // Muovi a sinistra.
+        right: () => movePiece(1, 0),   // Muovi a destra.
+        rotate: () => rotate(),         // Ruota.
+        down: () => softDrop(),         // Scendi.
+        drop: () => hardDrop(),         // Caduta immediata.
+        hold: () => hold()              // Riserva.
       };
-      map[action]();
-      drawAll();
+      map[action]();   // Eseguo l'azione scelta.
+      drawAll();       // Ridisegno.
     });
   });
 
-  document.getElementById('startBtn').addEventListener('click', startGame);
-  document.getElementById('resumeBtn').addEventListener('click', togglePause);
-  document.getElementById('restartBtn').addEventListener('click', reset);
+  // Collego i pulsanti delle overlay alle rispettive funzioni.
+  document.getElementById('startBtn').addEventListener('click', startGame);   // Gioca.
+  document.getElementById('resumeBtn').addEventListener('click', togglePause);  // Riprendi.
+  document.getElementById('restartBtn').addEventListener('click', reset);    // Rigioca.
 
-  // Game loop
-  let lastTime = 0;
-  function loop(ts) {
-    if (ts - lastTime >= dropInterval) {
-      lastTime = ts;
-      tick();
+  // GAME LOOP: il cuore del gioco. requestAnimationFrame chiama la funzione
+  // "loop" a ogni frame (circa 60 volte al secondo). Controllo l'intervallo
+  // di tempo trascorso: se è passato dropInterval, faccio scendere il pezzo.
+  let lastTime = 0;   // Timestamp dell'ultima caduta (in millisecondi).
+  function loop(ts) {   // ts = timestamp corrente dato dal browser.
+    if (ts - lastTime >= dropInterval) {   // Se è passato abbastanza tempo...
+      lastTime = ts;    // ...aggiorno il riferimento...
+      tick();           // ...e faccio un passo di gioco.
     }
-    requestAnimationFrame(loop);
+    requestAnimationFrame(loop);   // Richiedo il frame successivo (loop infinito).
   }
-  requestAnimationFrame(loop);
+  requestAnimationFrame(loop);   // Avvio il loop.
 
-  best = parseInt(localStorage.getItem('tetris-best') || '0', 10);
-  bestEl.textContent = best;
-  init();
-  drawAll();
+  // All'avvio: leggo il record salvato, inizializzo la partita e disegno tutto.
+  best = parseInt(localStorage.getItem('tetris-best') || '0', 10);  // Record salvato.
+  bestEl.textContent = best;   // Lo mostro.
+  init();                      // Preparo la partita (con la schermata di start visibile).
+  drawAll();                   // Disegno lo stato iniziale.
 })();
 </script>
 </body>
