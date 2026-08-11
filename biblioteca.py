@@ -55,7 +55,7 @@ from PyQt6.QtWidgets import (
     QTextEdit,          # Area di testo multilinea (per le note).
     QFileDialog         # Finestra per scegliere file da salvare/aprire.
 )
-from PyQt6.QtCore import Qt, QDate, QSize, QThread, pyqtSignal  # Funzioni base di Qt.
+from PyQt6.QtCore import Qt, QDate, QSize, QThread, pyqtSignal, QMargins  # Funzioni base di Qt.
 from PyQt6.QtGui import QColor, QFont, QPixmap, QIcon            # Elementi grafici (colori, font, immagini, icone).
 from PyQt6.QtCharts import (    # Libreria per disegnare i grafici delle statistiche.
     QChart,                     # Il contenitore del grafico.
@@ -64,6 +64,7 @@ from PyQt6.QtCharts import (    # Libreria per disegnare i grafici delle statist
     QPieSlice,                  # Una singola "fetta" del grafico a torta.
     QBarSet,                    # Un gruppo di barre nel grafico a barre.
     QBarSeries,                 # Serie dati per i grafici a barre.
+    QAbstractBarSeries,         # Classe base delle serie a barre (per etichette e posizioni).
     QBarCategoryAxis,           # Asse orizzontale delle categorie (etichette testuali).
     QValueAxis                  # Asse numerico (per i valori sull'asse Y).
 )
@@ -1353,10 +1354,12 @@ class MainWindow(QMainWindow):
         chart.setTitle(title)         # Titolo del grafico.
         chart.setAnimationOptions(QChart.AnimationOption.SeriesAnimations)  # Animazioni morbide.
         chart.legend().setAlignment(Qt.AlignmentFlag.AlignBottom)   # Legenda sotto.
+        chart.legend().setFont(QFont("", 9))      # Font leggenda più piccolo e leggibile.
         chart.setBackgroundVisible(False)   # Sfondo trasparente (stile coerente).
+        chart.setMargins(QMargins(0, 0, 0, 0))   # Margini ridotti: più spazio ai dati.
         view = QChartView(chart)      # Widget che disegna il grafico.
         view.setRenderHint(view.renderHints())   # Antialias per bordi lisci.
-        view.setMinimumHeight(220)    # Altezza minima.
+        view.setMinimumHeight(260)    # Altezza minima (260: spazio per etichette ruotate).
         builder(chart)                # Chiamo la funzione che popola il grafico.
         return view                   # Restituisco il widget pronto.
 
@@ -1371,6 +1374,8 @@ class MainWindow(QMainWindow):
         conn.close()   # Chiudo.
 
         series = QPieSeries()   # Serie a torta.
+        series.setLabelsVisible(True)   # Mostra le etichette sulle fette.
+        series.setLabelsPosition(QPieSlice.LabelPosition.LabelOutside)  # Etichette fuori dalla fetta.
         colors = {"Disponibile": QColor("#2e7d32"),   # Verde.
                   "In prestito": QColor("#e65100"),   # Arancione.
                   "In ritardo": QColor("#c62828")}    # Rosso.
@@ -1378,6 +1383,9 @@ class MainWindow(QMainWindow):
             if v > 0:   # ...se ha almeno un libro, aggiungo la fetta.
                 sl = series.append(f"{k} ({v})", v)   # Fetta con etichetta e valore.
                 sl.setColor(colors[k])                # Colore dedicato.
+                sl.setLabelVisible(True)              # Forzo l'etichetta sulla fetta.
+                sl.setLabelFont(QFont("", 8))         # Font piccolo: evita sovrapposizioni.
+                sl.setLabelArmLengthFactor(0.2)       # Braccio più lungo: etichette distanziate.
         chart.addSeries(series)   # Aggiungo la serie al grafico.
 
     def _make_genere_chart(self, chart):
@@ -1392,12 +1400,17 @@ class MainWindow(QMainWindow):
         conn.close()
 
         series = QPieSeries()
+        series.setLabelsVisible(True)   # Mostra le etichette sulle fette.
+        series.setLabelsPosition(QPieSlice.LabelPosition.LabelOutside)  # Etichette fuori.
         palette = [QColor("#5c6bc0"), QColor("#26a69a"), QColor("#ff7043"),
                    QColor("#ab47bc"), QColor("#ffa726"), QColor("#66bb6a"),
                    QColor("#ef5350"), QColor("#42a5f5")]   # Palette di 8 colori.
         for i, r in enumerate(rows):   # Per ogni genere...
             sl = series.append(f"{r['genere']} ({r['n']})", r["n"])   # Fetta con etichetta.
             sl.setColor(palette[i % len(palette)])   # Colore ciclico dalla palette.
+            sl.setLabelVisible(True)                 # Forzo l'etichetta sulla fetta.
+            sl.setLabelFont(QFont("", 8))            # Font piccolo per evitare sovrapposizioni.
+            sl.setLabelArmLengthFactor(0.2)          # Braccio lungo: etichette più distanziate.
         chart.addSeries(series)
 
     def _make_decenni_chart(self, chart):
@@ -1418,9 +1431,15 @@ class MainWindow(QMainWindow):
             bar.append(r["n"])           # Numero di libri di quel decennio.
         series = QBarSeries()            # Serie a barre.
         series.append(bar)               # Aggiungo le barre alla serie.
+        series.setLabelsVisible(True)    # Mostra il valore numerico sopra ogni barra.
+        series.setLabelsFormat("@value") # Il numero di libri del decennio.
+        series.setLabelsPosition(QAbstractBarSeries.LabelsPosition.LabelsOutsideEnd)  # Sopra la barra.
         chart.addSeries(series)
         axis_x = QBarCategoryAxis()     # Asse orizzontale a categorie (testi).
         axis_x.append(cats)             # Aggiungo le etichette.
+        axis_x.setTruncateLabels(False) # NON troncare i decenni (es. "1980" resta intero).
+        axis_x.setLabelsAngle(-45)      # Ruota le etichette di -45° per farle stare.
+        axis_x.setLabelsFont(QFont("", 9))  # Font delle etichette leggibile.
         chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)   # Asse in basso.
         series.attachAxis(axis_x)       # Collego la serie all'asse.
         axis_y = QValueAxis()           # Asse verticale numerico.
@@ -1442,13 +1461,28 @@ class MainWindow(QMainWindow):
         bar = QBarSet("Prestiti")   # Gruppo di barre "Prestiti".
         cats = []                   # Etichette mesi (es. "2026-08").
         for r in rows:
-            cats.append(r["mese"])
+            mese = r["mese"]        # Es. "2026-08".
+            # Converto "2026-08" in "ago 26" (mese abbreviato italiano + anno).
+            try:
+                y, m = mese.split("-")      # Separo anno e mese.
+                nomi = ["gen", "feb", "mar", "apr", "mag", "giu",
+                        "lug", "ago", "set", "ott", "nov", "dic"]   # Mesi abbreviati.
+                mese = f"{nomi[int(m) - 1]} {y[2:]}"   # Es. "ago 26".
+            except (ValueError, IndexError):   # Se il formato non è quello atteso...
+                pass   # ...lascio il testo originale.
+            cats.append(mese)
             bar.append(r["n"])
         series = QBarSeries()
         series.append(bar)
+        series.setLabelsVisible(True)    # Mostra il valore numerico sopra ogni barra.
+        series.setLabelsFormat("@value") # Il numero di prestiti del mese.
+        series.setLabelsPosition(QAbstractBarSeries.LabelsPosition.LabelsOutsideEnd)  # Sopra la barra.
         chart.addSeries(series)
         axis_x = QBarCategoryAxis()
         axis_x.append(cats)
+        axis_x.setTruncateLabels(False) # NON troncare i mesi (es. "ago 26" resta intero).
+        axis_x.setLabelsAngle(-45)      # Ruota le etichette di -45° per farle stare.
+        axis_x.setLabelsFont(QFont("", 9))  # Font delle etichette leggibile.
         chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
         series.attachAxis(axis_x)
         axis_y = QValueAxis()
@@ -1468,12 +1502,17 @@ class MainWindow(QMainWindow):
         conn.close()
 
         series = QPieSeries()
+        series.setLabelsVisible(True)   # Mostra le etichette sulle fette.
+        series.setLabelsPosition(QPieSlice.LabelPosition.LabelOutside)  # Etichette fuori.
         palette = [QColor("#ec407a"), QColor("#7e57c2"), QColor("#29b6f6"),
                    QColor("#9ccc65"), QColor("#ffca28"), QColor("#ff7043"),
                    QColor("#8d6e63"), QColor("#26a69a")]   # Palette colori.
         for i, r in enumerate(rows):
             sl = series.append(f"{r['autore']} ({r['n']})", r["n"])
             sl.setColor(palette[i % len(palette)])
+            sl.setLabelVisible(True)    # Forzo l'etichetta sulla fetta.
+            sl.setLabelFont(QFont("", 8))       # Font piccolo per evitare sovrapposizioni.
+            sl.setLabelArmLengthFactor(0.2)     # Braccio lungo: etichette più distanziate.
         chart.addSeries(series)
 
     def load_statistiche(self):
