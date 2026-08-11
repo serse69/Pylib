@@ -17,6 +17,10 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QDate, QSize, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPixmap, QIcon
+from PyQt6.QtCharts import (
+    QChart, QChartView, QPieSeries, QPieSlice, QBarSet, QBarSeries,
+    QBarCategoryAxis, QValueAxis
+)
 
 COVERS_DIR = Path(__file__).resolve().parent / "copertine"
 COVER_URL_CACHE = {}
@@ -725,22 +729,106 @@ class MainWindow(QMainWindow):
             ("restituzioni", "Restituzioni registrate"),
         ]
         for i, (key, label) in enumerate(stats_items):
-            grid.addWidget(QLabel(f"{label}:"), i, 0)
+            grid.addWidget(QLabel(f"{label}:"), i % 2, (i // 2) * 2)
             val = QLabel("0")
             val.setFont(QFont("", 12, QFont.Weight.Bold))
-            grid.addWidget(val, i, 1)
+            grid.addWidget(val, i % 2, (i // 2) * 2 + 1)
             self.stats_labels[key] = val
         lay.addWidget(self.stats_grid)
 
         self.stats_text = QLabel("")
         self.stats_text.setWordWrap(True)
+        self.stats_text.setStyleSheet("padding: 8px;")
         lay.addWidget(self.stats_text)
-        lay.addStretch()
+
+        charts_row = QHBoxLayout()
+
+        self.chart_stato = self._make_chart_view("Stato dei libri", self._make_stato_chart)
+        charts_row.addWidget(self.chart_stato)
+
+        self.chart_genere = self._make_chart_view("Distribuzione per genere", self._make_genere_chart)
+        charts_row.addWidget(self.chart_genere)
+
+        self.chart_decenni = self._make_chart_view("Libri per decennio", self._make_decenni_chart)
+        charts_row.addWidget(self.chart_decenni)
+
+        lay.addLayout(charts_row)
 
         refresh = QPushButton("Aggiorna")
         refresh.clicked.connect(self.load_statistiche)
         lay.addWidget(refresh)
         self.tabs.addTab(tab, "Statistiche")
+
+    def _make_chart_view(self, title, builder):
+        chart = QChart()
+        chart.setTitle(title)
+        chart.setAnimationOptions(QChart.AnimationOption.SeriesAnimations)
+        chart.legend().setAlignment(Qt.AlignmentFlag.AlignBottom)
+        chart.setBackgroundVisible(False)
+        view = QChartView(chart)
+        view.setRenderHint(view.renderHints())
+        view.setMinimumHeight(220)
+        builder(chart)
+        return view
+
+    def _make_stato_chart(self, chart):
+        conn = get_conn()
+        p_map = prestiti_per_libro(conn)
+        libri = conn.execute("SELECT id FROM libri").fetchall()
+        counts = {"Disponibile": 0, "In prestito": 0, "In ritardo": 0}
+        for l in libri:
+            counts[status_of(l["id"], p_map)] += 1
+        conn.close()
+        series = QPieSeries()
+        colors = {"Disponibile": QColor("#2e7d32"),
+                  "In prestito": QColor("#e65100"),
+                  "In ritardo": QColor("#c62828")}
+        for k, v in counts.items():
+            if v > 0:
+                sl = series.append(f"{k} ({v})", v)
+                sl.setColor(colors[k])
+        chart.addSeries(series)
+
+    def _make_genere_chart(self, chart):
+        conn = get_conn()
+        rows = conn.execute(
+            "SELECT genere, COUNT(*) AS n FROM libri "
+            "WHERE genere IS NOT NULL AND genere != '' "
+            "GROUP BY genere ORDER BY n DESC LIMIT 8").fetchall()
+        conn.close()
+        series = QPieSeries()
+        palette = [QColor("#5c6bc0"), QColor("#26a69a"), QColor("#ff7043"),
+                   QColor("#ab47bc"), QColor("#ffa726"), QColor("#66bb6a"),
+                   QColor("#ef5350"), QColor("#42a5f5")]
+        for i, r in enumerate(rows):
+            sl = series.append(f"{r['genere']} ({r['n']})", r["n"])
+            sl.setColor(palette[i % len(palette)])
+        chart.addSeries(series)
+
+    def _make_decenni_chart(self, chart):
+        conn = get_conn()
+        rows = conn.execute(
+            "SELECT CAST(CAST(anno/10 AS INTEGER)*10 AS TEXT) AS decennio, COUNT(*) AS n "
+            "FROM libri WHERE anno IS NOT NULL AND anno > 0 "
+            "GROUP BY decennio ORDER BY decennio").fetchall()
+        conn.close()
+        bar = QBarSet("Libri")
+        cats = []
+        for r in rows:
+            cats.append(r["decennio"])
+            bar.append(r["n"])
+        series = QBarSeries()
+        series.append(bar)
+        chart.addSeries(series)
+        axis_x = QBarCategoryAxis()
+        axis_x.append(cats)
+        chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
+        series.attachAxis(axis_x)
+        axis_y = QValueAxis()
+        axis_y.setLabelFormat("%d")
+        axis_y.setMin(0)
+        chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
+        series.attachAxis(axis_y)
 
     def load_statistiche(self):
         conn = get_conn()
@@ -785,6 +873,19 @@ class MainWindow(QMainWindow):
         else:
             self.stats_text.setText("Nessun prestito attivo.")
         conn.close()
+
+        for name, builder in (("chart_stato", self._make_stato_chart),
+                              ("chart_genere", self._make_genere_chart),
+                              ("chart_decenni", self._make_decenni_chart)):
+            view = getattr(self, name)
+            old = view.chart()
+            new = QChart()
+            new.setTitle(old.title())
+            new.setAnimationOptions(QChart.AnimationOption.SeriesAnimations)
+            new.legend().setAlignment(Qt.AlignmentFlag.AlignBottom)
+            new.setBackgroundVisible(False)
+            builder(new)
+            view.setChart(new)
 
 
 def main():
